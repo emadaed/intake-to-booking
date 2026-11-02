@@ -9,7 +9,7 @@ or health information are accepted or stored. Unknown fields are rejected.
 Run:  python src/lead_api.py     (listens on 127.0.0.1:5000)
 """
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -27,10 +27,27 @@ SOURCE_TO_CHANNEL = {
 }
 ALLOWED_FIELDS = {"utm_source", "utm_campaign", "payer_type", "created_at"}
 PAYER_TYPES = {"insurance", "self_pay"}
+REJECTED_FIELDS = {"http_status", "reason", "detail", "utm_source", "rejected_at"}
+
+REJECTED_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS rejected_lead (
+    rejected_id  INTEGER PRIMARY KEY,
+    received_at  TEXT NOT NULL,
+    rejected_at  TEXT,
+    http_status  INTEGER NOT NULL,
+    reason       TEXT NOT NULL,
+    detail       TEXT,
+    utm_source   TEXT
+)
+"""
 
 
 def create_app(db_path=DEFAULT_DB):
     app = Flask(__name__)
+
+    # Dead-letter table: created on startup if missing, so no DB rebuild needed.
+    with sqlite3.connect(db_path) as setup_con:
+        setup_con.execute(REJECTED_TABLE_SQL)
 
     def connect():
         con = sqlite3.connect(db_path)
@@ -84,6 +101,35 @@ def create_app(db_path=DEFAULT_DB):
                 (created, row[0], campaign, payer),
             )
         return jsonify(lead_id=cur.lastrowid, channel=channel, payer_type=payer), 201
+
+    @app.post("/rejected-leads")
+    def log_rejected_lead():
+        """Dead-letter log: n8n posts leads this API refused, so they stay reviewable."""
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify(error="invalid_json", detail="Body must be a JSON object"), 400
+        extra = set(body) - REJECTED_FIELDS
+        if extra:
+            return jsonify(error="unexpected_fields", detail=sorted(extra)), 400
+        try:
+            http_status = int(body["http_status"])
+            reason = str(body["reason"]).strip()
+        except (KeyError, TypeError, ValueError):
+            return jsonify(error="missing_fields", detail=["http_status", "reason"]), 400
+        if not reason:
+            return jsonify(error="missing_fields", detail=["reason"]), 400
+
+        def clip(value, n):
+            return None if value is None else str(value)[:n]
+
+        with connect() as con:
+            cur = con.execute(
+                "INSERT INTO rejected_lead(received_at, rejected_at, http_status, reason, detail, utm_source)"
+                " VALUES (?,?,?,?,?,?)",
+                (datetime.now(timezone.utc).isoformat(timespec="seconds"), clip(body.get("rejected_at"), 40),
+                 http_status, clip(reason, 60), clip(body.get("detail"), 80), clip(body.get("utm_source"), 40)),
+            )
+        return jsonify(rejected_id=cur.lastrowid), 201
 
     return app
 

@@ -1,0 +1,275 @@
+{
+  "name": "Lead Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-intake",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -736,
+        0
+      ],
+      "id": "00f7f594-19c4-483b-93cc-18d57725eede",
+      "name": "Webhook",
+      "webhookId": "4b80d758-7ed7-4308-8d65-cb84d66d4991"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allowed = ['utm_source', 'utm_campaign', 'payer_type', 'created_at'];\nconst body = $input.first().json.body || {};\nconst lead = {};\nconst dropped = [];\n\nfor (const [key, value] of Object.entries(body)) {\n  if (allowed.includes(key)) {\n    lead[key] = typeof value === 'string' ? value.trim() : value;\n  } else {\n    dropped.push(key); // log the field NAME only, never the value\n  }\n}\n\nif (lead.utm_source) lead.utm_source = lead.utm_source.toLowerCase();\nif (lead.payer_type) lead.payer_type = lead.payer_type.toLowerCase();\n\nreturn [{ json: { lead, dropped } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -512,
+        -400
+      ],
+      "id": "3bc143fe-5e25-46a8-b35c-e2236263aacc",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:5000/leads",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.lead }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -336,
+        0
+      ],
+      "id": "60db609d-cab2-45fa-aff0-2c9e5abc7232",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5cb88627-c591-44b9-8e9a-6e8d7eedd142",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 201,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -112,
+        -384
+      ],
+      "id": "f44900d8-e37b-4413-9197-00b3cad119ae",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "665451c0-a5d1-493c-9c3d-ec96e82ae6f3",
+              "name": "=lead_id",
+              "value": "={{ $json.body.lead_id }}",
+              "type": "string"
+            },
+            {
+              "id": "103e7847-a224-43b5-b2a0-2be0c7c22a96",
+              "name": "channel",
+              "value": "={{ $json.body.channel }}",
+              "type": "string"
+            },
+            {
+              "id": "3214170a-2194-4e7f-9ce1-b67e6c414da4",
+              "name": "next_action",
+              "value": "={{ $json.body.payer_type === 'insurance' ? 'verify_insurance_benefits' : 'send_self_pay_pricing' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        160,
+        -176
+      ],
+      "id": "2809fc5f-01e5-4713-9cd0-76b3e5621bc4",
+      "name": "Route follow-up"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9b2825ea-0155-47ba-95b7-98efa3014adb",
+              "name": "http_status",
+              "value": "={{ $json.statusCode }}",
+              "type": "number"
+            },
+            {
+              "id": "8562fe45-3fe1-4456-86f3-f0fd8039feaf",
+              "name": "reason",
+              "value": "={{ $json.body.error }}",
+              "type": "string"
+            },
+            {
+              "id": "515d7b5f-2071-4faf-8db2-a53333fa6e47",
+              "name": "detail",
+              "value": "={{ $json.body.detail }}",
+              "type": "string"
+            },
+            {
+              "id": "780a1485-ef08-4f0d-bb4d-bac824be7892",
+              "name": "rejected_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "6f3e62f4-a0e2-427b-98fa-b0240ed82524",
+              "name": "utm_source",
+              "value": "={{ $('Code in JavaScript').item.json.lead.utm_source }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        160,
+        0
+      ],
+      "id": "80e13ed1-f405-4c13-b778-43c44fc3f2b9",
+      "name": "Rejected lead record"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:5000/rejected-leads",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        352,
+        64
+      ],
+      "id": "7632189c-1414-4bec-adbb-c7f1d730a06b",
+      "name": "HTTP Request1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Route follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rejected lead record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rejected lead record": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "2d6e8636-aa95-479d-a53e-40c991e629cf",
+  "meta": {
+    "instanceId": "36543f8f06ae7f76f5a2c64b92d08770b5e209d99e1a1678e48f03a77a86001b"
+  },
+  "id": "6POYatF0jpUMkWij",
+  "tags": []
+}

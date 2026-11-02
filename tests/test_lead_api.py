@@ -70,3 +70,42 @@ def test_non_json_body_rejected(client):
 
 def test_bad_timestamp_rejected(client):
     assert client.post("/leads", json={**GOOD, "created_at": "yesterday"}).status_code == 422
+
+
+# ---- dead-letter endpoint ----
+REJECT = {"http_status": 422, "reason": "unknown_source", "detail": "tiktok", "utm_source": "tiktok"}
+
+
+def rejected_count(db):
+    return sqlite3.connect(db).execute("SELECT COUNT(*) FROM rejected_lead").fetchone()[0]
+
+
+def test_rejected_lead_is_logged(client):
+    db = client.application.config["DB"]
+    before = rejected_count(db)
+    r = client.post("/rejected-leads", json=REJECT)
+    assert r.status_code == 201
+    assert rejected_count(db) == before + 1
+
+
+def test_rejected_lead_does_not_touch_fact_lead(client):
+    db = client.application.config["DB"]
+    before = lead_count(db)
+    client.post("/rejected-leads", json=REJECT)
+    assert lead_count(db) == before
+
+
+def test_rejected_log_requires_reason_and_status(client):
+    assert client.post("/rejected-leads", json={"detail": "x"}).status_code == 400
+
+
+def test_rejected_log_refuses_unexpected_fields(client):
+    r = client.post("/rejected-leads", json={**REJECT, "email": "x@y.com"})
+    assert r.status_code == 400 and r.get_json()["error"] == "unexpected_fields"
+
+
+def test_rejected_log_clips_long_values(client):
+    client.post("/rejected-leads", json={**REJECT, "detail": "z" * 500})
+    stored = sqlite3.connect(client.application.config["DB"]).execute(
+        "SELECT detail FROM rejected_lead ORDER BY rejected_id DESC LIMIT 1").fetchone()[0]
+    assert len(stored) == 80
