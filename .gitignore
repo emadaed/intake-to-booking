@@ -1,0 +1,7 @@
+# virtual Environmanet
+
+venv
+venv/
+data/*.db
+.env
+env
