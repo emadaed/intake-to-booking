@@ -58,7 +58,7 @@ prevented (SPEC-001). SPEC-004 describes this.
 
 ## What I would do next
 1. Build SPEC-001 (deduplication), then SPEC-004 (outage handling).
-2. Document Matomo events and dimensions for each funnel step.
+2. Run Matomo locally, send simulated events following `docs/matomo_event_spec.md`, and record where reality differs from the design.
 3. Optionally let a local model rephrase the quoted passage, as a separate experiment with its own tests.
 4. Replace simulated spend and appointment outcomes with real feeds (SPEC-002, SPEC-003).
 
@@ -66,6 +66,7 @@ prevented (SPEC-001). SPEC-004 describes this.
 - Simulated data; assumed channel behavior.
 - The assistant was tested only on questions written by its author. Guardrail behavior is verified; answer accuracy on real staff questions is not. It shows the closest approved passage and cannot judge whether that passage answers the question. The privacy check errs toward refusing and cannot reliably detect patient names.
 - No GoHighLevel, Matomo or HIPAA compliance experience is claimed. HIPAA appears here only as a design principle (minimum necessary data).
+- The Matomo design has not been run against a Matomo server.
 - Local, single-machine setup; no authentication, monitoring or production hardening.
 
 ## Skills this project shows

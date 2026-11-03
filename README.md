@@ -53,7 +53,7 @@ Exported workflow: [n8n/lead_intake.json](n8n/lead_intake.json)
 | Staff knowledge assistant: quotes approved documents only, refuses patient identifiers and clinical questions, abstains without evidence | Built |
 | 71 automated tests (data, API and assistant) | Built |
 | Deduplication, API-outage handling, appointment sync, ad-spend ingestion | **Proposed** as engineering specs, not built |
-| Matomo event and dimension design | **Planned**, not yet built |
+| Matomo event and dimension design | Design document written ([docs/matomo_event_spec.md](docs/matomo_event_spec.md)); Matomo itself **not installed or run** |
 
 Backlog: [docs/automation_backlog.md](docs/automation_backlog.md)
 Specs: [SPEC-001](specs/SPEC-001_lead_deduplication.md) · [SPEC-002](specs/SPEC-002_ad_spend_ingestion.md) · [SPEC-003](specs/SPEC-003_appointment_status_sync.md) · [SPEC-004](specs/SPEC-004_api_unavailable_handling.md)
