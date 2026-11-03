@@ -2,10 +2,11 @@
 
 A portfolio project that follows a patient-style funnel end to end: **ad spend → lead → booking → occurred appointment**.
 It shows how to connect marketing spend to the outcome that matters (appointments that actually happen), with
-automation, a strict intake API, a reporting database and a dashboard.
+automation, a strict intake API, a reporting database, a dashboard and a guarded staff knowledge assistant.
 
-> **All data is synthetic.** No real patient, company or ad-platform data is used. The channel results below come from
-> assumptions built into the data generator. They are not research findings.
+> **The data is synthetic; the problem is real.** Healthcare marketing teams need to know which ad spend leads to
+> appointments that actually happen. No real patient, company or ad-platform data is used here, and the channel results
+> below come from assumptions built into the data generator. They are not research findings.
 
 ![Dashboard with four charts](docs/Intake-to-Booking.PNG)
 
@@ -49,9 +50,10 @@ Exported workflow: [n8n/lead_intake.json](n8n/lead_intake.json)
 | n8n intake workflow with success and rejection paths | Built |
 | Rejected-lead log (dead-letter table) | Built |
 | Postgres reporting copy and Metabase dashboard (4 charts) | Built |
-| 21 automated tests | Built |
+| Staff knowledge assistant: quotes approved documents only, refuses patient identifiers and clinical questions, abstains without evidence | Built |
+| 71 automated tests (data, API and assistant) | Built |
 | Deduplication, API-outage handling, appointment sync, ad-spend ingestion | **Proposed** as engineering specs, not built |
-| Staff knowledge assistant with privacy guardrails, Matomo event design | **Planned**, not yet built |
+| Matomo event and dimension design | **Planned**, not yet built |
 
 Backlog: [docs/automation_backlog.md](docs/automation_backlog.md)
 Specs: [SPEC-001](specs/SPEC-001_lead_deduplication.md) · [SPEC-002](specs/SPEC-002_ad_spend_ingestion.md) · [SPEC-003](specs/SPEC-003_appointment_status_sync.md) · [SPEC-004](specs/SPEC-004_api_unavailable_handling.md)
@@ -68,7 +70,7 @@ pip install -r requirements.txt
 
 python src/generate_data.py      # builds data/funnel.db (synthetic)
 python src/build_views.py        # creates the SQL views
-pytest -v                        # 21 tests
+pytest -v                        # 71 tests
 
 python src/lead_api.py           # leave running (127.0.0.1:5000)
 ```
@@ -85,6 +87,13 @@ Then open Metabase at http://localhost:3000 and add a PostgreSQL database with h
 database `reporting`, user `itb` and the password from `.env`. The four dashboard queries are in
 [sql/dashboard_queries.sql](sql/dashboard_queries.sql).
 
+Staff knowledge assistant (fictional example policies in `knowledge/`):
+
+```powershell
+python src/knowledge_assistant.py "How do I verify a patient's insurance?"
+python src/knowledge_assistant.py --list
+```
+
 n8n: run `n8n start`, open http://localhost:5678, import `n8n/lead_intake.json`, and test with the webhook test URL.
 
 ## Design decisions
@@ -92,6 +101,7 @@ n8n: run `n8n start`, open http://localhost:5678, import `n8n/lead_intake.json`,
 - **Privacy by design:** the API rejects any field outside a short allowlist, so contact details and health information cannot enter the system.
 - **Spend fan-out guard:** spend and funnel counts are aggregated separately before joining; a test checks that totals still match the source.
 - **Honest rates:** show rate counts only appointments with a final status, so future appointments are not treated as no-shows.
+- **Extractive assistant, rules in code:** the assistant never writes free text; it quotes a current approved document with its ID and date. Refusals (patient identifiers, clinical questions, emergencies) and abstention are plain code, not prompt instructions.
 - **Operational vs reporting database:** the API writes to SQLite; Metabase reads a Postgres copy refreshed by a script that checks row counts and total spend.
 
 ## Limitations
@@ -100,6 +110,7 @@ n8n: run `n8n start`, open http://localhost:5678, import `n8n/lead_intake.json`,
 - October looks low on the dashboard because appointments after 31 October are still "scheduled".
 - The system cannot recognize the same person twice because it deliberately stores no contact details.
 - If the API is down, leads sent through n8n are lost today. This is documented in SPEC-004 and tested.
+- The assistant was tested only on questions written by its author: guardrail behavior is verified, answer accuracy on real staff questions is not. It matches words, so paraphrases can be missed, and it cannot reliably detect patient names.
 - Local, single-machine setup; not production-ready.
 
 ---
