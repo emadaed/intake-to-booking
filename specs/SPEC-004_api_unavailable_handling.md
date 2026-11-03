@@ -25,7 +25,10 @@ the lead was **lost** (it exists only in n8n's execution history). Three weaknes
 
 ## 3. Interim mitigation (no engineering, partial)
 In n8n: switch on **Retry On Fail** for the HTTP Request node (a few tries with a wait), and add an **Error Workflow** that records failed executions and sends a notification.
-Limits: (a) as far as I know, with Never Error on, HTTP error statuses do not count as node failures, so Retry On Fail would only trigger on network failures. **Verify in the n8n version in use (1.110.1).** (b) Retrying before SPEC-001 can create duplicates after a lost reply. (c) It does not give a durable queue.
+Limits and test result:
+- **(a) Tested by the author, 2026-11-02, n8n 1.110.1:** with the API stopped and Retry On Fail switched on for the HTTP Request node, the node still failed with `ECONNREFUSED`, no retry attempts were observed, and the lead was not stored. Retry On Fail therefore did **not** rescue the lead in this setup. The exact retry settings used were not recorded (see open question 5).
+- (b) Retrying before SPEC-001 can create duplicates after a lost reply.
+- (c) It does not give a durable queue.
 
 ## 4. Edge cases
 | Case | Expected |
@@ -52,3 +55,4 @@ Outage simulation (stop and restart the API during a load of test leads); timeou
 2. Where should the durable inbox live (queue service, database table, other)?
 3. Who receives alerts, and through which channel?
 4. Should the webhook acknowledge the source immediately and process later?
+5. Re-test Retry On Fail with explicit settings (for example Max Tries 3, Wait 1000 ms) and record the execution log, to confirm why no retries were seen.
