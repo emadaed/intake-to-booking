@@ -6,13 +6,19 @@ that must be strict: validating a lead and writing it to the database.
 Privacy by design: this project is attribution-only, so NO contact details
 or health information are accepted or stored. Unknown fields are rejected.
 
+It also serves the weekly funnel report (GET /reports/weekly), so n8n can schedule it. The report contains
+aggregate numbers only. There is no login on this demo API.
+
 Run:  python src/lead_api.py     (listens on 127.0.0.1:5000)
 """
+import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from flask import Flask, jsonify, request
+
+import weekly_report
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB = ROOT / "data" / "funnel.db"
@@ -42,7 +48,8 @@ CREATE TABLE IF NOT EXISTS rejected_lead (
 """
 
 
-def create_app(db_path=DEFAULT_DB):
+def create_app(db_path=DEFAULT_DB, report_generate=None):
+    """`report_generate(prompt) -> str` replaces the Ollama call (used by tests)."""
     app = Flask(__name__)
 
     # Dead-letter table: created on startup if missing, so no DB rebuild needed.
@@ -130,6 +137,26 @@ def create_app(db_path=DEFAULT_DB):
                  http_status, clip(reason, 60), clip(body.get("detail"), 80), clip(body.get("utm_source"), 40)),
             )
         return jsonify(rejected_id=cur.lastrowid), 201
+
+    @app.get("/reports/weekly")
+    def weekly_report_endpoint():
+        """Query: no_llm=true (template only), as_of=YYYY-MM-DD, model=<ollama model name>."""
+        use_llm = request.args.get("no_llm", "false").lower() not in ("1", "true", "yes")
+        as_of = None
+        if request.args.get("as_of"):
+            try:
+                as_of = date.fromisoformat(request.args["as_of"])
+            except ValueError:
+                return jsonify(error="invalid_as_of", detail="Use YYYY-MM-DD"), 400
+        model = request.args.get("model", weekly_report.DEFAULT_MODEL)
+        if not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,60}", model):
+            return jsonify(error="invalid_model"), 400
+        try:
+            result = weekly_report.generate_report(db_path, as_of=as_of, model=model, use_llm=use_llm,
+                                                   generate=report_generate)
+        except weekly_report.NoSpendData:
+            return jsonify(error="no_spend_data", detail="No ad spend rows to report on"), 409
+        return jsonify(result), 200
 
     return app
 

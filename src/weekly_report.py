@@ -42,10 +42,14 @@ MAX_ATTEMPTS = 3
 
 
 # ----------------------------------------------------------------------------- data
+class NoSpendData(Exception):
+    pass
+
+
 def last_spend_date(con):
     v = con.execute("SELECT MAX(date) FROM fact_spend").fetchone()[0]
     if v is None:
-        raise SystemExit("fact_spend is empty. Run src/generate_data.py first.")
+        raise NoSpendData("fact_spend is empty. Run src/generate_data.py first.")
     return date.fromisoformat(v)
 
 
@@ -170,6 +174,10 @@ def build_facts(data):
         final = c["occurred"] + c["no_show"] + c["cancelled"]
         if final:
             show[ch] = c["occurred"] / final
+    spend_now = {ch: data["cur"][ch]["spend"] for ch in PAID}
+    top = max(spend_now, key=spend_now.get) if any(spend_now.values()) else None
+    f["rank.top_spend_channel"] = (top or "n/a", "paid channel with the highest spend this week")
+    f["rank.top_spend"] = (money0(spend_now[top]) if top else "n/a", "that channel's spend this week")
     f["rank.cheapest_channel"] = (min(cost, key=cost.get) if cost else "n/a", "channel with the lowest cohort cost per occurred appointment")
     f["rank.cheapest_cost"] = (money2(min(cost.values())) if cost else "n/a", "that lowest cost")
     f["rank.priciest_channel"] = (max(cost, key=cost.get) if cost else "n/a", "channel with the highest cohort cost per occurred appointment")
@@ -186,7 +194,7 @@ PLACEHOLDER = re.compile(r"\{([a-z_.]+)\}")
 NUMBER_WORDS = re.compile(r"\b(two|three|four|five|six|seven|eight|nine|ten|twice|double|triple|half|dozen|hundred|thousand|million)\b", re.I)
 CAUSAL = re.compile(r"\b(because|due to|caused|driven by|as a result|therefore|recommend\w*|should|must|suggest\w*|likely|probably)\b", re.I)
 TREND = re.compile(r"\b(up|down|flat|stable|steady|unchanged|increase[ds]?|decrease[ds]?|rose|risen|rise|fell|fall|grew|grow\w*|dropped|drop|declined?|surged?|jumped?|improved?|worsened?)\b", re.I)
-RANKING = re.compile(r"\b(higher|lower|highest|lowest|best|worst|cheaper|cheapest|pricier|priciest|better|worse|outperform\w*|underperform\w*)\b", re.I)
+RANKING = re.compile(r"\b(higher|lower|highest|lowest|best|worst|cheaper|cheapest|pricier|priciest|better|worse|largest|smallest|biggest|leading|dominant|majority|contributors?|outperform\w*|underperform\w*)\b", re.I)
 MARKDOWN = re.compile(r"[*#`|_~]|(^|\s)[-\u2022]\s")
 
 
@@ -250,7 +258,7 @@ def build_prompt(facts):
         "   must be written as a placeholder in curly braces, exactly as listed, for example {total.spend}.",
         "3. Use only the placeholders listed below, and at least four different ones.",
         "4. Do not explain causes, do not give advice, do not guess. Do not use: because, due to, should, recommend, likely.",
-        "5. Words like up, down, flat, increase, decrease, higher, lower, highest, lowest, best, worst, cheapest may only appear",
+        "5. Words like up, down, flat, increase, decrease, higher, lower, highest, lowest, largest, best, worst, cheapest may only appear",
         "   in a sentence that also contains a placeholder ending in _dir, or one starting with rank.",
         "6. Mention at least one matured-cohort or rank. placeholder. The cohort is a group of older leads whose",
         "   appointments have had time to finish.",
@@ -334,7 +342,7 @@ def render(data, facts, summary):
         k = ch.lower()
         L.append(f"{ch:<11}{facts[k + '.cohort_leads'][0]:>7}{facts[k + '.cohort_occurred'][0]:>10}"
                  f"{facts[k + '.cohort_show_rate'][0]:>11}{facts[k + '.cohort_cost_per_occurred'][0]:>19}")
-    L.append("")
+    L += ["", "Cohort sizes are small: do not read one week's differences between channels as a trend.", ""]
     if summary["source"] == "model":
         L.append(f"Method: summary written by a language model, then checked by code (attempt {summary['attempts']}). "
                  "Every number in the text was filled in from the database; the model wrote none.")
@@ -345,6 +353,25 @@ def render(data, facts, summary):
                  "(see log below). Every number comes from the database.")
     L += ["Verification log: " + " | ".join(summary["log"]) if summary["log"] else "Verification log: template only (--no-llm)."]
     return "\n".join(L) + "\n"
+
+
+def generate_report(db_path, as_of=None, model=DEFAULT_MODEL, use_llm=True, generate=None):
+    """Build the whole report. `generate(prompt) -> str` can be injected (tests, API); default is Ollama.
+    Raises NoSpendData when there is nothing to report on."""
+    con = sqlite3.connect(db_path)
+    try:
+        as_of = as_of or last_spend_date(con)
+        data = compute(con, as_of)
+    finally:
+        con.close()
+    facts = build_facts(data)
+    if use_llm:
+        gen = generate or (lambda p: ollama_generate(model, p))
+        summary = write_summary(data, facts, gen)
+    else:
+        summary = {"source": "template", "text": fallback_text(facts), "attempts": 0, "log": []}
+    return {"as_of": as_of.isoformat(), "report": render(data, facts, summary), "source": summary["source"],
+            "attempts": summary["attempts"], "log": summary["log"]}
 
 
 def run_eval(facts, data, generate_with_seed, n):
@@ -377,12 +404,15 @@ def main(argv=None):
 
     if not Path(a.db).exists():
         sys.exit("Database not found. Run src/generate_data.py first.")
-    con = sqlite3.connect(a.db)
-    as_of = date.fromisoformat(a.as_of) if a.as_of else last_spend_date(con)
-    data = compute(con, as_of)
-    facts = build_facts(data)
+    as_of = date.fromisoformat(a.as_of) if a.as_of else None
 
     if a.eval:
+        con = sqlite3.connect(a.db)
+        try:
+            data = compute(con, as_of or last_spend_date(con))
+        except NoSpendData as e:
+            sys.exit(str(e))
+        facts = build_facts(data)
         print(f"Asking {a.model} for {a.eval} independent summaries (temperature 0.7, no retries)...")
         gen = lambda prompt, i: ollama_generate(a.model, prompt, seed=i, temperature=0.7)
         passed, reasons = run_eval(facts, data, gen, a.eval)
@@ -391,16 +421,16 @@ def main(argv=None):
             print(f"  {n}x {r}")
         return
 
-    if a.no_llm:
-        summary = {"source": "template", "text": fallback_text(facts), "attempts": 0, "log": []}
-    else:
+    if not a.no_llm:
         print(f"Asking {a.model} (CPU generation can take a minute or two)...")
-        summary = write_summary(data, facts, lambda p: ollama_generate(a.model, p))
-    report = render(data, facts, summary)
-    out = Path(a.out) if a.out else REPORTS_DIR / f"weekly_{as_of}.txt"
+    try:
+        result = generate_report(a.db, as_of=as_of, model=a.model, use_llm=not a.no_llm)
+    except NoSpendData as e:
+        sys.exit(str(e))
+    out = Path(a.out) if a.out else REPORTS_DIR / f"weekly_{result['as_of']}.txt"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(report, encoding="utf-8")
-    print(report)
+    out.write_text(result["report"], encoding="utf-8")
+    print(result["report"])
     print(f"Saved to {out}")
 
 

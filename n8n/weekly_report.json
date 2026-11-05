@@ -1,0 +1,190 @@
+{
+  "name": "Weekly Funnel Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -464,
+        -208
+      ],
+      "id": "da3503ec-1958-456b-8f49-50d978ee015b",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:5000/reports/weekly",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 300000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        16
+      ],
+      "id": "c01cca53-0140-4e8f-b41f-29770cbe1bc2",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6ebd5eff-7e8a-431c-9499-b48b7b748628",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -48,
+        -208
+      ],
+      "id": "d6a5ccc2-4c74-4131-9b7a-b0fd0bf88d9e",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e344ec69-da01-41cf-b2c2-356904fbc769",
+              "name": "report",
+              "value": "={{ $json.body.report }}",
+              "type": "number"
+            },
+            {
+              "id": "ce900035-8d57-48c2-9b03-f33014936d4b",
+              "name": "method",
+              "value": "={{ $json.body.source }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "ignoreConversionErrors": true
+        }
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        272,
+        -352
+      ],
+      "id": "ac7a846e-4071-4f02-a7b3-dffb2d02e1e3",
+      "name": "Weekly report"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "96b3e3ba-7d22-40f3-aa15-e60052acf7b9",
+              "name": "error",
+              "value": "={{ $json.body.error }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        288,
+        -112
+      ],
+      "id": "72227f51-f881-4721-8a26-c2e17ad4f5e4",
+      "name": "Report failed"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Weekly report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Report failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c5cbc1b2-7b3b-41d0-9953-da6b5f2f57f6",
+  "meta": {
+    "instanceId": "36543f8f06ae7f76f5a2c64b92d08770b5e209d99e1a1678e48f03a77a86001b"
+  },
+  "id": "wfKtcXdn5wYnQZcQ",
+  "tags": []
+}

@@ -147,6 +147,7 @@ BAD = [
                    "Bookings were {total.bookings}."), "matured-cohort"),
     ("trend without dir", GOOD.replace("{total.spend_dir} {total.spend_change}", "{total.spend_change}").replace("Paid leads were", "Leads rose and were"), "trend word"),
     ("ranking without rank", GOOD.replace("{rank.cheapest_channel} had the lowest cost per occurred appointment at {rank.cheapest_cost}", "{google.cohort_show_rate} of Google visits was the best outcome"), "ranking word"),
+    ("largest without rank", GOOD + " Google was the largest contributor to {google.spend}.", "ranking word"),
     ("up without dir", GOOD + " Google leads were up on {google.cohort_leads}.", "trend word"),
     ("empty", "   ", "empty"),
 ]
@@ -232,3 +233,31 @@ def test_command_line_template_report_is_written(con, tmp_path):
     text = out.read_text(encoding="utf-8")
     assert "Weekly funnel report (synthetic demo data)" in text and "$1,050" in text
     assert "language model not used" in text
+
+
+def test_top_spend_fact_exists_so_the_model_can_name_the_biggest_channel(facts):
+    assert facts["rank.top_spend_channel"][0] == "Google" and facts["rank.top_spend"][0] == "$700"
+    ok, why, filled = wr.verify(GOOD + " The largest spend was {rank.top_spend_channel} at {rank.top_spend}.", facts)
+    assert ok, why
+    assert "The largest spend was Google at $700." in filled
+
+
+def test_report_always_carries_the_small_sample_note(con):
+    data = wr.compute(con, AS_OF)
+    f = wr.build_facts(data)
+    out = wr.render(data, f, {"source": "template", "text": wr.fallback_text(f), "attempts": 0, "log": []})
+    assert "do not read one week's differences between channels as a trend" in out
+
+
+def test_generate_report_with_injected_model(con):
+    db = con.execute("PRAGMA database_list").fetchone()[2]
+    r = wr.generate_report(db, as_of=AS_OF, generate=lambda p: GOOD)
+    assert r["source"] == "model" and r["attempts"] == 1 and "$1,050" in r["report"]
+
+
+def test_generate_report_raises_when_there_is_no_spend(tmp_path):
+    c = sqlite3.connect(tmp_path / "n.db")
+    c.executescript((ROOT / "sql" / "schema.sql").read_text())
+    c.commit(); c.close()
+    with pytest.raises(wr.NoSpendData):
+        wr.generate_report(tmp_path / "n.db")
