@@ -1,0 +1,21 @@
+Weekly funnel report (synthetic demo data)
+Week: 2026-10-25 to 2026-10-31   (compared with 2026-10-18 to 2026-10-24)
+Matured cohort for appointment outcomes: leads created 2026-09-27 to 2026-10-03
+
+Summary
+This week's spend was $1,988 with $968 and $699 being the largest contributors. Google's spend was flat versus the previous week, while Meta's spend was down. The matured cohort, which started on 2026-09-27 and ended on 2026-10-03, had 29 leads from Google and 45 leads from Meta. The channel with the lowest cohort cost per occurred appointment was Meta at $56.00, while the channel with the highest cohort cost per occurred appointment was Microsoft at $133.13.
+
+This week vs previous week (paid channels)
+channel         spend   leads  bookings   spend change
+Google           $968      36        16   flat within 2%
+Meta             $699      51        20   down 6%
+Microsoft        $321       8         1   up 13%
+
+Matured cohort (appointment outcomes)
+channel      leads  occurred  show rate  cost per occurred
+Google          29         8        67%            $123.73
+Meta            45        13        50%             $56.00
+Microsoft        8         2        67%            $133.13
+
+Method: summary written by a language model, then checked by code (attempt 1). Every number in the text was filled in from the database; the model wrote none.
+Verification log: attempt 1: passed verification
