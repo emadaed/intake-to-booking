@@ -3,7 +3,7 @@ Week: 2026-10-25 to 2026-10-31   (compared with 2026-10-18 to 2026-10-24)
 Matured cohort for appointment outcomes: leads created 2026-09-27 to 2026-10-03
 
 Summary
-This week's spend was flat at $1,988 with Google and Meta spend decreasing by within 2% and 6% respectively. Google leads increased by 140% and Meta leads decreased by 16%. The matured cohort shows Google with the highest share of finished appointments that occurred at 67% and Meta with the lowest at 50%. Microsoft spend increased by 13% and is the priciest channel with a cost per occurred appointment of $133.13.
+Total spend was $1,988 this week, flat within 2% versus the previous week. Google spend was flat within 2% versus the previous week. Meta spend was down 6% versus the previous week. In the matured cohort, Meta had the lowest show rate at 50%.
 
 This week vs previous week (paid channels)
 channel         spend   leads  bookings   spend change
@@ -19,5 +19,5 @@ Microsoft        8         2        67%            $133.13
 
 Cohort sizes are small: do not read one week's differences between channels as a trend.
 
-Method: summary written by a language model, then checked by code (attempt 1). Every number in the text was filled in from the database; the model wrote none.
-Verification log: attempt 1: passed verification
+Method: summary written by a language model, then checked by code (attempt 2). Every number in the text was filled in from the database; the model wrote none.
+Verification log: attempt 1: rejected - comparison or ranking word without a rank.* or _dir placeholder in the same sentence | attempt 2: passed verification

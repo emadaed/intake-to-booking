@@ -16,6 +16,7 @@ prose is insightful or that every sentence is a fair reading of the numbers.
 Run:   python src/weekly_report.py                    (uses Ollama, default model llama3.1:latest)
        python src/weekly_report.py --no-llm           (template only)
        python src/weekly_report.py --eval 10          (how often does the model pass verification on try 1?)
+       python src/weekly_report.py --eval 5 --retries (how often does a report fall back to the template?)
 """
 import argparse
 import json
@@ -166,7 +167,22 @@ def build_facts(data):
                                         f"{ch} share of finished appointments that occurred (matured cohort)")
         f[f"{key}.cohort_cost_per_occurred"] = (money2(c["spend"] / c["occurred"]) if c["occurred"] else "n/a",
                                                 f"{ch} cost per occurred appointment (matured cohort)")
-    # rankings, computed by code so the model never has to compare numbers itself
+    # Rankings are computed by code so the model never has to compare numbers itself.
+    # Ties are decided on the DISPLAYED value: two channels that both show 67% are reported together.
+    def extreme(values, ndigits, pick):
+        if not values:
+            return None, []
+        shown = {ch: round(v, ndigits) for ch, v in values.items()}
+        target = pick(shown.values())
+        chans = [ch for ch in PAID if shown.get(ch) == target]
+        return values[chans[0]], chans
+
+    def names(chans):
+        if not chans:
+            return "n/a"
+        return chans[0] if len(chans) == 1 else ", ".join(chans[:-1]) + " and " + chans[-1]
+
+    spend_now = {ch: data["cur"][ch]["spend"] for ch in PAID}
     cost = {ch: data["coh"][ch]["spend"] / data["coh"][ch]["occurred"] for ch in PAID if data["coh"][ch]["occurred"]}
     show = {}
     for ch in PAID:
@@ -174,18 +190,21 @@ def build_facts(data):
         final = c["occurred"] + c["no_show"] + c["cancelled"]
         if final:
             show[ch] = c["occurred"] / final
-    spend_now = {ch: data["cur"][ch]["spend"] for ch in PAID}
-    top = max(spend_now, key=spend_now.get) if any(spend_now.values()) else None
-    f["rank.top_spend_channel"] = (top or "n/a", "paid channel with the highest spend this week")
-    f["rank.top_spend"] = (money0(spend_now[top]) if top else "n/a", "that channel's spend this week")
-    f["rank.cheapest_channel"] = (min(cost, key=cost.get) if cost else "n/a", "channel with the lowest cohort cost per occurred appointment")
-    f["rank.cheapest_cost"] = (money2(min(cost.values())) if cost else "n/a", "that lowest cost")
-    f["rank.priciest_channel"] = (max(cost, key=cost.get) if cost else "n/a", "channel with the highest cohort cost per occurred appointment")
-    f["rank.priciest_cost"] = (money2(max(cost.values())) if cost else "n/a", "that highest cost")
-    f["rank.highest_show_channel"] = (max(show, key=show.get) if show else "n/a", "channel with the highest cohort show rate")
-    f["rank.highest_show_rate"] = (pct0(max(show.values())) if show else "n/a", "that highest show rate")
-    f["rank.lowest_show_channel"] = (min(show, key=show.get) if show else "n/a", "channel with the lowest cohort show rate")
-    f["rank.lowest_show_rate"] = (pct0(min(show.values())) if show else "n/a", "that lowest show rate")
+    top_v, top_c = extreme(spend_now, 0, max) if any(spend_now.values()) else (None, [])
+    chp_v, chp_c = extreme(cost, 2, min)
+    prc_v, prc_c = extreme(cost, 2, max)
+    hs_v, hs_c = extreme(show, 2, max)
+    ls_v, ls_c = extreme(show, 2, min)
+    f["rank.top_spend_channel"] = (names(top_c), "paid channel with the highest spend this week")
+    f["rank.top_spend"] = (money0(top_v) if top_c else "n/a", "that channel's spend this week")
+    f["rank.cheapest_channel"] = (names(chp_c), "channel(s) with the lowest cohort cost per occurred appointment")
+    f["rank.cheapest_cost"] = (money2(chp_v) if chp_c else "n/a", "that lowest cost")
+    f["rank.priciest_channel"] = (names(prc_c), "channel(s) with the highest cohort cost per occurred appointment")
+    f["rank.priciest_cost"] = (money2(prc_v) if prc_c else "n/a", "that highest cost")
+    f["rank.highest_show_channel"] = (names(hs_c), "channel(s) with the highest cohort show rate")
+    f["rank.highest_show_rate"] = (pct0(hs_v) if hs_c else "n/a", "that highest show rate")
+    f["rank.lowest_show_channel"] = (names(ls_c), "channel(s) with the lowest cohort show rate")
+    f["rank.lowest_show_rate"] = (pct0(ls_v) if ls_c else "n/a", "that lowest show rate")
     return f
 
 
@@ -193,9 +212,23 @@ def build_facts(data):
 PLACEHOLDER = re.compile(r"\{([a-z_.]+)\}")
 NUMBER_WORDS = re.compile(r"\b(two|three|four|five|six|seven|eight|nine|ten|twice|double|triple|half|dozen|hundred|thousand|million)\b", re.I)
 CAUSAL = re.compile(r"\b(because|due to|caused|driven by|as a result|therefore|recommend\w*|should|must|suggest\w*|likely|probably)\b", re.I)
-TREND = re.compile(r"\b(up|down|flat|stable|steady|unchanged|increase[ds]?|decrease[ds]?|rose|risen|rise|fell|fall|grew|grow\w*|dropped|drop|declined?|surged?|jumped?|improved?|worsened?)\b", re.I)
+TREND = re.compile(r"\b(up|down|flat|stable|steady|unchanged|increas\w*|decreas\w*|rise|rises|rising|risen|rose|fell|falls|falling|fallen|grew|grow|grows|growing|growth|drop|drops|dropped|dropping|declin\w*|surg\w*|jump\w*|improv\w*|worsen\w*)\b", re.I)
+CHANNEL_WORD = re.compile(r"\b(Google|Meta|Microsoft|Organic|Referral)\b")
 RANKING = re.compile(r"\b(higher|lower|highest|lowest|best|worst|cheaper|cheapest|pricier|priciest|better|worse|largest|smallest|biggest|leading|dominant|majority|contributors?|outperform\w*|underperform\w*)\b", re.I)
 MARKDOWN = re.compile(r"[*#`|_~]|(^|\s)[-\u2022]\s")
+
+
+def implied_channels(ids, facts):
+    """Channels a sentence is really talking about, judged from its placeholders (not from the model's words)."""
+    out = set()
+    for i in ids:
+        head, _, rest = i.partition(".")
+        if head in ("google", "meta", "microsoft"):
+            out.add(head.capitalize())
+        elif head == "rank":
+            fam = re.sub(r"_(channel|cost|rate)$", "", rest)
+            out.update(n for n in re.split(r", | and ", facts.get(f"rank.{fam}_channel", ("",))[0]) if n)
+    return out
 
 
 def verify(text, facts):
@@ -228,15 +261,22 @@ def verify(text, facts):
         reasons.append("no matured-cohort or ranking placeholder")
     if CAUSAL.search(stripped):
         reasons.append("causal, advice or speculation wording")
-    for s in sentences:
-        sids = PLACEHOLDER.findall(s)
-        if TREND.search(PLACEHOLDER.sub("", s)) and not any(i.endswith("_dir") or i.endswith("_change") for i in sids):
-            reasons.append("trend word without a _dir/_change placeholder in the same sentence")
+    if TREND.search(stripped):
+        reasons.append("trend word written by the model (direction must come from a _dir placeholder)")
+    for m in re.finditer(r"\{([a-z_.]+)_change\}", t):
+        if not t[:m.start()].rstrip(" ").endswith("{" + m.group(1) + "_dir}"):
+            reasons.append("a _change placeholder must directly follow its own _dir placeholder")
             break
     for s in sentences:
         sids = PLACEHOLDER.findall(s)
         if RANKING.search(PLACEHOLDER.sub("", s)) and not any(i.startswith("rank.") or i.endswith("_dir") for i in sids):
             reasons.append("comparison or ranking word without a rank.* or _dir placeholder in the same sentence")
+            break
+    for sent in sentences:
+        sids = PLACEHOLDER.findall(sent)
+        typed = set(CHANNEL_WORD.findall(PLACEHOLDER.sub("", sent)))
+        if typed and not typed <= implied_channels(sids, facts):
+            reasons.append("channel name does not match the placeholders in the same sentence")
             break
     if reasons:
         return False, reasons, ""
@@ -246,6 +286,13 @@ def verify(text, facts):
 # ----------------------------------------------------------------------------- the model
 class ModelUnavailable(Exception):
     pass
+
+
+PROMPT_EXAMPLE = (
+    "Paid spend was {total.spend} this week, {total.spend_dir} {total.spend_change} versus the previous week. "
+    "{google.leads} leads came from Google ({google.leads_dir} {google.leads_change}) and {meta.leads} from Meta "
+    "({meta.leads_dir} {meta.leads_change}). In the matured cohort, {rank.lowest_show_channel} had the lowest show rate "
+    "at {rank.lowest_show_rate}.")
 
 
 def build_prompt(facts):
@@ -258,10 +305,16 @@ def build_prompt(facts):
         "   must be written as a placeholder in curly braces, exactly as listed, for example {total.spend}.",
         "3. Use only the placeholders listed below, and at least four different ones.",
         "4. Do not explain causes, do not give advice, do not guess. Do not use: because, due to, should, recommend, likely.",
-        "5. Words like up, down, flat, increase, decrease, higher, lower, highest, lowest, largest, best, worst, cheapest may only appear",
-        "   in a sentence that also contains a placeholder ending in _dir, or one starting with rank.",
+        "5. NEVER write direction words yourself (up, down, flat, increase, decrease, rise, fall, grow, drop). Direction comes only",
+        "   from a _dir placeholder, followed directly by its _change placeholder, for example:",
+        "   Google spend was {google.spend_dir} {google.spend_change} versus the previous week.",
+        "   Ranking words (highest, lowest, largest, cheapest, best, worst) may only appear in a sentence that has a",
+        "   placeholder starting with rank. Name a channel in words only if the placeholders in that sentence are about that channel.",
         "6. Mention at least one matured-cohort or rank. placeholder. The cohort is a group of older leads whose",
         "   appointments have had time to finish.",
+        "",
+        "EXAMPLE of the required style (choose your own facts and wording):",
+        PROMPT_EXAMPLE,
         "",
         "PLACEHOLDERS (the current value is shown only so you understand the data; do not copy it):",
     ]
@@ -391,6 +444,20 @@ def run_eval(facts, data, generate_with_seed, n):
     return passed, reasons
 
 
+def run_eval_with_retries(data, facts, generate_with_seed, n):
+    """Run the whole retry loop n times. -> Counter of 'attempt 1/2/3' (model text used) and 'template fallback'."""
+    outcome = Counter()
+    for i in range(n):
+        calls = {"k": 0}
+
+        def gen(prompt, i=i, calls=calls):
+            calls["k"] += 1
+            return generate_with_seed(prompt, i * 10 + calls["k"])
+        s = write_summary(data, facts, gen)
+        outcome[f"attempt {s['attempts']}" if s["source"] == "model" else "template fallback"] += 1
+    return outcome
+
+
 # ----------------------------------------------------------------------------- command line
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
@@ -399,6 +466,7 @@ def main(argv=None):
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--no-llm", action="store_true", help="use the fixed template only")
     ap.add_argument("--eval", type=int, metavar="N", help="measure how often the model passes verification on the first try")
+    ap.add_argument("--retries", action="store_true", help="with --eval: run the full retry loop and report how many reports fall back to the template")
     ap.add_argument("--out", help="write the report to this file (default: reports/weekly_<date>.txt)")
     a = ap.parse_args(argv)
 
@@ -413,8 +481,14 @@ def main(argv=None):
         except NoSpendData as e:
             sys.exit(str(e))
         facts = build_facts(data)
-        print(f"Asking {a.model} for {a.eval} independent summaries (temperature 0.7, no retries)...")
         gen = lambda prompt, i: ollama_generate(a.model, prompt, seed=i, temperature=0.7)
+        if a.retries:
+            print(f"Running the full retry loop (up to {MAX_ATTEMPTS} attempts) for {a.eval} reports with {a.model}...")
+            outcome = run_eval_with_retries(data, facts, gen, a.eval)
+            for k in [f"attempt {i}" for i in range(1, MAX_ATTEMPTS + 1)] + ["template fallback"]:
+                print(f"  {k}: {outcome.get(k, 0)} of {a.eval}")
+            return
+        print(f"Asking {a.model} for {a.eval} independent summaries (temperature 0.7, no retries)...")
         passed, reasons = run_eval(facts, data, gen, a.eval)
         print(f"Passed verification on the first try: {passed} of {a.eval}")
         for r, n in reasons.most_common():

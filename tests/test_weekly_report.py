@@ -261,3 +261,79 @@ def test_generate_report_raises_when_there_is_no_spend(tmp_path):
     c.commit(); c.close()
     with pytest.raises(wr.NoSpendData):
         wr.generate_report(tmp_path / "n.db")
+
+
+# ---- fixes found on the first live model runs ------------------------------------------------------------
+def test_ties_are_reported_together_not_as_a_single_winner(con):
+    """Live finding: Google and Microsoft both showed 67%, but the report named only Google as 'highest'."""
+    data = wr.compute(con, AS_OF)
+    data["coh"]["Microsoft"] = dict(spend=100.0, leads=4, bookings=4, occurred=3, no_show=1, cancelled=0, unfinished=0)
+    data["coh"]["Google"] = dict(spend=70.0, leads=4, bookings=4, occurred=3, no_show=1, cancelled=0, unfinished=0)
+    f = wr.build_facts(data)
+    assert f["rank.highest_show_rate"][0] == "75%"
+    assert f["rank.highest_show_channel"][0] == "Google and Microsoft"
+    assert wr.verify(wr.fallback_template(f), f)[0]          # the template still verifies with tie wording
+    assert "(Google and Microsoft)" in wr.fallback_text(f)
+
+
+def test_a_tie_allows_both_channel_names_in_words(con):
+    data = wr.compute(con, AS_OF)
+    data["coh"]["Microsoft"] = dict(spend=100.0, leads=4, bookings=4, occurred=3, no_show=1, cancelled=0, unfinished=0)
+    f = wr.build_facts(data)
+    text = (GOOD + " Google and Microsoft had the highest show rate at {rank.highest_show_rate}.")
+    assert wr.verify(text, f)[0]
+
+
+def test_the_exact_live_sentence_that_slipped_through_is_rejected(facts):
+    live = ("This week's spend was {total.spend} with {google.spend} and {meta.spend} being the largest contributors. "
+            "{google.spend_dir} {meta.spend_dir} {rank.lowest_show_channel}. Third sentence here.")
+    ok, why, _ = wr.verify(live, facts)
+    assert not ok and any("ranking word" in r for r in why)
+
+
+def test_direction_words_written_by_the_model_are_rejected(facts):
+    live = ("This week's spend was flat at {total.spend} with Google spend decreasing by {google.spend_change}. "
+            "Meta leads were {meta.leads} and {rank.lowest_show_channel} had {rank.lowest_show_rate}.")
+    ok, why, _ = wr.verify(live, facts)
+    assert not ok and any("trend word" in r for r in why)
+
+
+def test_change_placeholder_must_directly_follow_its_own_dir_placeholder(facts):
+    text = GOOD.replace("{total.spend_dir} {total.spend_change}", "{total.spend_dir} by {total.spend_change}")
+    ok, why, _ = wr.verify(text, facts)
+    assert not ok and any("directly follow" in r for r in why)
+    wrong_pair = GOOD.replace("{total.spend_dir} {total.spend_change}", "{meta.spend_dir} {total.spend_change}")
+    assert not wr.verify(wrong_pair, facts)[0]
+
+
+def test_channel_name_must_match_the_placeholders_in_its_sentence(facts):
+    wrong = GOOD + " Google had the priciest cost of {rank.priciest_cost}."      # in the fixture, Meta is priciest
+    ok, why, _ = wr.verify(wrong, facts)
+    assert not ok and any("channel name" in r for r in why)
+    right = GOOD + " Meta had the priciest cost of {rank.priciest_cost}."
+    assert wr.verify(right, facts)[0]
+    mismatch = GOOD + " Google spend was {meta.spend} this week."
+    assert not wr.verify(mismatch, facts)[0]
+    # a name with no matching data at all is also refused
+    assert not wr.verify(GOOD + " Microsoft was quiet.", facts)[0]
+
+
+def test_prompt_tells_the_model_not_to_write_direction_words(facts):
+    p = wr.build_prompt(facts)
+    assert "NEVER write direction words" in p and "{google.spend_dir} {google.spend_change}" in p
+
+
+def test_the_example_in_the_prompt_passes_the_checker(facts):
+    """If the prompt teaches a style the checker rejects, the model can never win."""
+    ok, why, _ = wr.verify(wr.PROMPT_EXAMPLE, facts)
+    assert ok, why
+    assert wr.PROMPT_EXAMPLE in wr.build_prompt(facts)
+
+
+def test_retry_evaluation_counts_each_outcome(con, facts):
+    data = wr.compute(con, AS_OF)
+    script = {1: "bad", 2: GOOD,            # report 0: passes on attempt 2
+              11: GOOD,                      # report 1: passes on attempt 1
+              21: "bad", 22: "bad", 23: "bad"}   # report 2: falls back
+    out = wr.run_eval_with_retries(data, facts, lambda p, seed: script[seed], 3)
+    assert out["attempt 1"] == 1 and out["attempt 2"] == 1 and out["template fallback"] == 1
