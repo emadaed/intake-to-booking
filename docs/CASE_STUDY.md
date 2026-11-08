@@ -17,6 +17,7 @@ made the decisions about scope, design and what to record. The mistakes below ar
 - **SQL attribution views** and **8 data tests** (no orphan rows, funnel never grows, spend totals reconcile).
 - **Lead intake API** (Flask) that validates strictly and writes to the database, plus **13 API tests**.
 - **Staff knowledge assistant** over fictional policy documents: quotes approved text only, with 50 tests for its guardrails.
+- **Weekly funnel report:** a local language model (Ollama) writes the sentences; code fills in and verifies every number, with a fixed-template fallback, an API endpoint and a weekly n8n schedule. **124 automated tests** in total.
 - **n8n workflow:** webhook → clean → call API → route success (insurance or self-pay follow-up) or failure (logged to a rejected-lead table).
 - **Postgres reporting copy** and a **Metabase dashboard** with four charts.
 - **A backlog and four engineering specs** for the things I did not build.
@@ -47,6 +48,10 @@ proves the pipeline works, not that Meta behaves this way in real life.
 | Metabase refused the database login | Most likely browser autofill replacing the typed login (not confirmed) | Set a known password and used a private window |
 | The Y-axis had no values in the point-and-click builder | Metabase did not offer the numeric columns | Rebuilt the chart from a SQL question |
 | My own test question "How much notice is needed to cancel?" got no answer | The policy said "24 hours before" and never used the word "notice"; the search matches words | Rewrote the document in the words staff actually use and added a few filler words to the stop list. The general limit (paraphrases can be missed) remains and is documented |
+| The weekly report's checker approved a sentence calling two channels "the largest contributors" | "Largest" was not on my list of ranking words | Added the words, gave the model a code-computed "top spend" fact, and re-tested on the live output |
+| The report named one channel as having the highest show rate when two tied at 67% | Ties were decided on unrounded values | Ties are decided on the displayed value and reported together |
+| The model wrote its own direction word ("decreasing by within 2%") beside my number, when the channel was flat | I only checked that a direction placeholder was somewhere in the sentence | The model may no longer write direction words; a change placeholder must directly follow its own direction placeholder; a channel name must match the data in its sentence |
+| Only 3 of 10 summaries passed after I tightened the checker | A prompt rule alone did not stop the model writing digits and direction words | One worked example in the prompt raised first-try passes to 7 of 10 (small sample) |
 | **A lead was lost when the API was stopped** | The HTTP node's "Never Error" setting only handles error *responses*, not a missing response | Written up as SPEC-004; see below |
 
 ### The gap I found in my own design
@@ -56,16 +61,22 @@ failed with `ECONNREFUSED` and the lead existed only in n8n's execution history.
 lead was still lost. A real fix needs a durable inbox and classified retries, and retries are only safe once duplicates are
 prevented (SPEC-001). SPEC-004 describes this.
 
+## The weekly report: the model writes words, code owns the numbers
+The model gets named placeholders such as `{total.spend}` and writes the sentences around them. Code computes every figure from the database, fills the placeholders in, and rejects text that breaks the rules. After three rejected tries the report falls back to a fixed template, and an unverified summary is never published. A "matured cohort" rule keeps recent, unfinished appointments out of the cost-per-occurred figures.
+
+Measured on a local 8B model: 7 of 10 summaries passed on the first try with the final checker and prompt (3 of 10 before the worked example), and a separate run of 5 complete reports passed on the first attempt 5 times. These are small samples on one model. The checks guarantee the numbers and guard the wording; they cannot prove a sentence is a fair reading of the numbers, which is why reading the live output mattered: it found three gaps my tests had not.
+
 ## What I would do next
 1. Build SPEC-001 (deduplication), then SPEC-004 (outage handling).
 2. Run Matomo locally, send simulated events following `docs/matomo_event_spec.md`, and record where reality differs from the design.
-3. Optionally let a local model rephrase the quoted passage, as a separate experiment with its own tests.
+3. Deliver the weekly report (email or chat) and re-measure its pass rate on more runs and a second model.
 4. Replace simulated spend and appointment outcomes with real feeds (SPEC-002, SPEC-003).
 
 ## Honest limits
 - Simulated data; assumed channel behavior.
 - The assistant was tested only on questions written by its author. Guardrail behavior is verified; answer accuracy on real staff questions is not. It shows the closest approved passage and cannot judge whether that passage answers the question. The privacy check errs toward refusing and cannot reliably detect patient names.
 - No GoHighLevel, Matomo or HIPAA compliance experience is claimed. HIPAA appears here only as a design principle (minimum necessary data).
+- The weekly report's pass rates come from small samples on one local model; its schedule runs only while my machine, n8n and the API are on, and it does not send the report anywhere yet.
 - The Matomo design has not been run against a Matomo server.
 - Local, single-machine setup; no authentication, monitoring or production hardening.
 
@@ -78,4 +89,5 @@ prevented (SPEC-001). SPEC-004 describes this.
 | Dashboards | Metabase, four charts |
 | Judgment with sensitive data | Field allowlist; no contact or health data stored |
 | AI guardrails and testing | Knowledge assistant: deterministic refusals and abstention, 50 tests |
+| LLM workflow with verified output | Weekly report: placeholders, code checks, template fallback, measured pass rates |
 | Light Python | API, generator, sync script, tests |

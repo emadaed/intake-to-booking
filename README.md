@@ -2,7 +2,8 @@
 
 A portfolio project that follows a patient-style funnel end to end: **ad spend → lead → booking → occurred appointment**.
 It shows how to connect marketing spend to the outcome that matters (appointments that actually happen), with
-automation, a strict intake API, a reporting database, a dashboard and a guarded staff knowledge assistant.
+automation, a strict intake API, a reporting database, a dashboard, a guarded staff knowledge assistant and a weekly report
+in which a local language model writes the sentences and code verifies every number.
 
 > **The data is synthetic; the problem is real.** Healthcare marketing teams need to know which ad spend leads to
 > appointments that actually happen. No real patient, company or ad-platform data is used here, and the channel results
@@ -51,7 +52,8 @@ Exported workflow: [n8n/lead_intake.json](n8n/lead_intake.json)
 | Rejected-lead log (dead-letter table) | Built |
 | Postgres reporting copy and Metabase dashboard (4 charts) | Built |
 | Staff knowledge assistant: quotes approved documents only, refuses patient identifiers and clinical questions, abstains without evidence | Built |
-| 71 automated tests (data, API and assistant) | Built |
+| Weekly funnel report: a local language model writes the sentences, code fills in and verifies every number, with a fixed-template fallback; served by an API endpoint and scheduled in n8n | Built. The schedule runs only while the local machine is on, and the report is not sent anywhere yet |
+| 124 automated tests (data, API, assistant and weekly report) | Built |
 | Deduplication, API-outage handling, appointment sync, ad-spend ingestion | **Proposed** as engineering specs, not built |
 | Matomo event and dimension design | Design document written ([docs/matomo_event_spec.md](docs/matomo_event_spec.md)); Matomo itself **not installed or run** |
 
@@ -70,7 +72,7 @@ pip install -r requirements.txt
 
 python src/generate_data.py      # builds data/funnel.db (synthetic)
 python src/build_views.py        # creates the SQL views
-pytest -v                        # 71 tests
+pytest -v                        # 124 tests
 
 python src/lead_api.py           # leave running (127.0.0.1:5000)
 ```
@@ -94,7 +96,17 @@ python src/knowledge_assistant.py "How do I verify a patient's insurance?"
 python src/knowledge_assistant.py --list
 ```
 
-n8n: run `n8n start`, open http://localhost:5678, import `n8n/lead_intake.json`, and test with the webhook test URL.
+Weekly funnel report (the language-model path needs Ollama with a local model; `--no-llm` needs nothing). A sample is in `reports/`:
+
+```powershell
+python src/weekly_report.py --no-llm       # fixed template, no model
+python src/weekly_report.py                # local model (default llama3.1:latest), verified by code
+python src/weekly_report.py --eval 10      # how often the model passes verification on the first try
+```
+
+The same report is served at `GET /reports/weekly` by the API.
+
+n8n: run `n8n start`, open http://localhost:5678, import `n8n/lead_intake.json` (and `n8n/weekly_report.json` for the weekly schedule), and test with the webhook test URL.
 
 ## Design decisions
 
@@ -102,6 +114,7 @@ n8n: run `n8n start`, open http://localhost:5678, import `n8n/lead_intake.json`,
 - **Spend fan-out guard:** spend and funnel counts are aggregated separately before joining; a test checks that totals still match the source.
 - **Honest rates:** show rate counts only appointments with a final status, so future appointments are not treated as no-shows.
 - **Extractive assistant, rules in code:** the assistant never writes free text; it quotes a current approved document with its ID and date. Refusals (patient identifiers, clinical questions, emergencies) and abstention are plain code, not prompt instructions.
+- **Code owns every number in the weekly report:** the model writes sentences around named placeholders and never a digit. Code fills in the values and rejects text that breaks the rules (a digit outside a placeholder, an unknown placeholder, causal wording, a direction or ranking word without the matching placeholder, a channel name that does not match its data). Three failed tries fall back to a fixed template. On a local 8B model, 7 of 10 summaries passed on the first try, up from 3 of 10 before a worked example was added to the prompt (small samples).
 - **Operational vs reporting database:** the API writes to SQLite; Metabase reads a Postgres copy refreshed by a script that checks row counts and total spend.
 
 ## Limitations
@@ -111,6 +124,8 @@ n8n: run `n8n start`, open http://localhost:5678, import `n8n/lead_intake.json`,
 - The system cannot recognize the same person twice because it deliberately stores no contact details.
 - If the API is down, leads sent through n8n are lost today. This is documented in SPEC-004 and tested.
 - The assistant was tested only on questions written by its author: guardrail behavior is verified, answer accuracy on real staff questions is not. It matches words, so paraphrases can be missed, and it cannot reliably detect patient names.
+- The weekly report's checks guarantee the numbers and guard the wording; they cannot prove a sentence is a fair reading of the numbers. Live testing found three gaps in my own checker (an unlisted ranking word, a tie reported as one winner, direction words written by the model). Each is fixed and tested. Pass rates come from small samples on one local model.
+- The weekly n8n workflow builds the report but does not send it anywhere, and runs only while the local machine, n8n and the API are on. The report endpoint has no login.
 - Local, single-machine setup; not production-ready.
 
 ---

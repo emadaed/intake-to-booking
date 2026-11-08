@@ -29,6 +29,7 @@ An item goes to **engineering** if any of these is true; otherwise it is built w
 | B-08 | Appointment status sync from the scheduling/EHR system | Proposed | **Engineering** | Production system access, PHI risk (criteria 1, 2) | SPEC-001 | Occurred / no-show status updated within a set time of the visit | P2 → SPEC-003 |
 | B-09 | Daily ad-spend ingestion (Google, Meta, Microsoft) | Proposed | **Engineering** | Credentials, scheduling, late revisions to spend (criteria 1, 3) | Campaign naming convention | Spend in the database matches platform reports within an agreed tolerance | P2 → SPEC-002 |
 | B-10 | No-show reminder follow-up flow | Proposed | No-code (n8n or CRM workflow) | Message sending is a standard workflow once B-08 supplies status | B-08 | Fewer no-shows (baseline and target to be agreed) | P3 |
+| B-11 | Weekly funnel report (local LLM writes the sentences; code fills in and verifies every number; fixed-template fallback) | **Built** (schedule runs only while the local machine is on; not yet delivered anywhere) | AI workflow + small API endpoint | Aggregate numbers only; the verification is code | B-03 | Every number in the text comes from the database; rules covered by 53 automated tests; first-try pass rate measured on a local model (7 of 10, small sample) | Done |
 
 ## Priority reasoning
 
@@ -40,5 +41,6 @@ An item goes to **engineering** if any of these is true; otherwise it is built w
 
 - All data is simulated. The channel results (for example Meta's show rate) are assumptions chosen for the demo, not findings.
 - The system stores no contact details, so it cannot recognize the same person submitting twice. SPEC-001 deals only with the same *submission* sent twice.
+- The weekly report endpoint has no login, and its checks cannot prove a sentence is a fair reading of the numbers. Pass rates are from small samples on one local model.
 - The knowledge assistant matches words, so a paraphrase can be missed, and it cannot reliably detect patient names. It has been tested only on questions written by its author.
 - October looks low on the dashboard because appointments after 31 October are still "scheduled", not yet "occurred".
